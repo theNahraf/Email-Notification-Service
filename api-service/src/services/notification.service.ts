@@ -54,6 +54,7 @@ export class NotificationService {
 
     // --- Idempotency Check ---
     if (dto.idempotencyKey) {
+      logger.debug({ idempotencyKey: dto.idempotencyKey }, 'Performing idempotency check');
       const existing = await this.checkIdempotency(dto.idempotencyKey);
       if (existing) {
         logger.info(
@@ -82,8 +83,9 @@ export class NotificationService {
       maxRetries: getConfig().retry.maxAttempts,
     });
 
+    logger.debug({ email: dto.email, channel: NotificationChannel.EMAIL }, 'Saving notification record to database');
     const saved = await repo.save(notification);
-    logger.info({ notificationId: saved.id, email: dto.email }, 'Notification created');
+    logger.info({ notificationId: saved.id, email: dto.email, status: saved.status }, 'Notification created in DB');
 
     // --- Enqueue to Worker ---
     try {
@@ -96,11 +98,13 @@ export class NotificationService {
         userId: saved.userId || undefined,
       };
 
+      logger.debug({ notificationId: saved.id }, 'Enqueuing email job to BullMQ');
       await this.queueProducer.enqueueEmail(jobData, {
         jobId: saved.id, // Use notification ID as job ID for traceability
       });
 
       // Update status to QUEUED
+      logger.debug({ notificationId: saved.id }, 'Updating notification status to QUEUED');
       await repo.update(saved.id, { status: NotificationStatus.QUEUED });
 
       // Cache idempotency key

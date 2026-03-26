@@ -47,6 +47,8 @@ export class SmtpProvider implements EmailProvider {
     const config = getConfig();
     const senderAddress = from || config.email.from;
 
+    logger.debug({ to, subject, senderAddress }, 'Initiating SMTP transmission via Nodemailer');
+
     const info = await this.transporter.sendMail({
       from: senderAddress,
       to,
@@ -55,7 +57,7 @@ export class SmtpProvider implements EmailProvider {
     });
 
     logger.info(
-      { messageId: info.messageId, to, subject },
+      { messageId: info.messageId, to, subject, response: info.response },
       'Email sent via SMTP'
     );
   }

@@ -59,6 +59,8 @@ export async function createEmailNotification(
   next: NextFunction
 ): Promise<void> {
   try {
+    logger.debug({ requestId: req.requestId, body: req.body }, 'Received POST /notifications/email request');
+
     // Validate request
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -72,8 +74,8 @@ export async function createEmailNotification(
     const { email, template_id, subject, payload, user_id, idempotency_key } = req.body;
 
     logger.info(
-      { requestId: req.requestId, email, templateId: template_id },
-      'Creating email notification'
+      { requestId: req.requestId, email, templateId: template_id, idempotencyKey: idempotency_key },
+      'Validation passed. Creating email notification'
     );
 
     const result = await getService().createEmailNotification({
@@ -87,6 +89,8 @@ export async function createEmailNotification(
 
     const statusCode =
       result.status === 'queued' ? HTTP_STATUS.ACCEPTED : HTTP_STATUS.OK;
+
+    logger.debug({ requestId: req.requestId, notificationId: result.id, statusCode }, 'Sending response to client');
 
     res.status(statusCode).json({
       id: result.id,

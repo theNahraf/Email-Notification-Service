@@ -56,6 +56,7 @@ export class EmailConsumer {
     const repo = getDataSource().getRepository(Notification);
 
     // --- Update status to PROCESSING ---
+    logger.debug({ notificationId, attempt }, 'Updating notification status to PROCESSING in DB');
     await repo.update(notificationId, {
       status: NotificationStatus.PROCESSING,
       retryCount: attempt - 1,
@@ -63,22 +64,26 @@ export class EmailConsumer {
 
     try {
       // --- Validate template exists ---
+      logger.debug({ templateId }, 'Validating template existence');
       if (!this.templateEngine.hasTemplate(templateId)) {
         throw new Error(`Template not found: ${templateId}`);
       }
 
       // --- Render template ---
+      logger.debug({ templateId, payloadVariables: Object.keys(payload || {}) }, 'Rendering email HTML template');
       const html = this.templateEngine.render(templateId, payload);
       const emailSubject = subject || this.getDefaultSubject(templateId);
 
       // --- Send email ---
+      logger.debug({ email, emailSubject }, 'Handing over to Email Provider to send email');
       await this.emailProvider.send(email, emailSubject, html);
 
       // --- Mark as SENT ---
+      logger.debug({ notificationId }, 'Updating notification status to SENT in DB');
       await repo.update(notificationId, {
         status: NotificationStatus.SENT,
-        sentAt: new Date(),
         retryCount: attempt - 1,
+        sentAt: new Date(),
       });
 
       logger.info(
