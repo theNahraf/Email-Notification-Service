@@ -1,0 +1,23 @@
+{
+  "name": "worker-service",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc && npm run copy-templates",
+    "copy-templates": "cp -r src/templates dist/templates 2>/dev/null || true",
+    "dev": "ts-node -r reflect-metadata src/index.ts",
+    "start": "node -r reflect-metadata dist/index.js"
+  },
+  "dependencies": {
+    "shared": "1.0.0",
+    "handlebars": "^4.7.8",
+    "nodemailer": "^6.9.14",
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^20.14.0",
+    "@types/nodemailer": "^6.4.15",
+    "ts-node": "^10.9.2"
+  }
+}

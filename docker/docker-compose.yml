@@ -1,0 +1,123 @@
+# ============================================
+# Email Notification Service — Docker Compose
+# ============================================
+
+services:
+  # --- PostgreSQL ---
+  postgres:
+    image: postgres:16-alpine
+    container_name: notify-postgres
+    environment:
+      POSTGRES_USER: notify_user
+      POSTGRES_PASSWORD: notify_password
+      POSTGRES_DB: notification_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notify_user -d notification_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # --- Redis ---
+  redis:
+    image: redis:7-alpine
+    container_name: notify-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # --- API Service ---
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    container_name: notify-api
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      API_PORT: 3000
+      API_KEY: dev-api-key-change-in-production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: notify_user
+      DB_PASSWORD: notify_password
+      DB_DATABASE: notification_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RATE_LIMIT_WINDOW_MS: 60000
+      RATE_LIMIT_MAX_REQUESTS: 100
+      EMAIL_PROVIDER: smtp
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: 587
+      SMTP_SECURE: "false"
+      SMTP_USER: jalladvlogs@gmail.com
+      SMTP_PASS: "xifviszvawvsanoi"
+      EMAIL_FROM: jalladvlogs@gmail.com
+      RETRY_MAX_ATTEMPTS: 3
+      RETRY_BASE_DELAY_MS: 2000
+      QUEUE_CONCURRENCY: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
+
+  # --- Worker Service ---
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    container_name: notify-worker
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: notify_user
+      DB_PASSWORD: notify_password
+      DB_DATABASE: notification_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EMAIL_PROVIDER: smtp
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: 587
+      SMTP_SECURE: "false"
+      SMTP_USER: jalladvlogs@gmail.com
+      SMTP_PASS: "Vlogs@123"
+      EMAIL_FROM: jalladvlogs@gmail.com
+      RETRY_MAX_ATTEMPTS: 3
+      RETRY_BASE_DELAY_MS: 2000
+      QUEUE_CONCURRENCY: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

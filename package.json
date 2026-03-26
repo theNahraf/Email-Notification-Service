@@ -1,0 +1,25 @@
+{
+  "name": "notification-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-ready, scalable Email Notification Service",
+  "workspaces": [
+    "shared",
+    "api-service",
+    "worker-service"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "build:shared": "npm run build -w shared",
+    "build:api": "npm run build -w api-service",
+    "build:worker": "npm run build -w worker-service",
+    "dev:api": "npm run dev -w api-service",
+    "dev:worker": "npm run dev -w worker-service",
+    "lint": "eslint . --ext .ts",
+    "docker:up": "docker compose -f docker/docker-compose.yml up --build",
+    "docker:down": "docker compose -f docker/docker-compose.yml down -v"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

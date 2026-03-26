@@ -1,0 +1,62 @@
+# ============================================
+# API Service — Multi-stage Docker Build
+# ============================================
+
+# Stage 1: Build
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy root workspace files
+COPY package.json ./
+COPY tsconfig.base.json ./
+
+# Copy workspace package.json files for dependency resolution
+COPY shared/package.json ./shared/
+COPY api-service/package.json ./api-service/
+COPY worker-service/package.json ./worker-service/
+
+# Install all dependencies
+RUN npm install --workspace=shared --workspace=api-service
+
+# Copy source code
+COPY shared/ ./shared/
+COPY api-service/ ./api-service/
+
+# Build shared first, then api-service
+RUN npm run build -w shared
+RUN npm run build -w api-service
+
+# Stage 2: Production
+FROM node:20-alpine AS production
+
+WORKDIR /app
+
+# Security: run as non-root
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -S appuser -u 1001 -G appgroup
+
+# Copy root workspace files
+COPY package.json ./
+COPY shared/package.json ./shared/
+COPY api-service/package.json ./api-service/
+COPY worker-service/package.json ./worker-service/
+
+# Install production dependencies only
+RUN npm install --workspace=shared --workspace=api-service --omit=dev
+
+# Copy built artifacts
+COPY --from=builder /app/shared/dist ./shared/dist
+COPY --from=builder /app/api-service/dist ./api-service/dist
+
+# Switch to non-root user
+USER appuser
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+CMD ["node", "-r", "reflect-metadata", "api-service/dist/index.js"]
