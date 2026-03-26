@@ -28,3 +28,7 @@ logs/
 coverage/
 
 .jpg/
+
+# Secrets / local deployment docs
+DEPLOYMENT.md
+
