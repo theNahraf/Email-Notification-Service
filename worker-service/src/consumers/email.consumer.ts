@@ -76,7 +76,7 @@ export class EmailConsumer {
 
       // --- Send email ---
       logger.debug({ email, emailSubject }, 'Handing over to Email Provider to send email');
-      await this.emailProvider.send(email, emailSubject, html);
+      await this.emailProvider.send(email, emailSubject, html, undefined, job.data.smtpConfig);
 
       // --- Mark as SENT ---
       logger.debug({ notificationId }, 'Updating notification status to SENT in DB');

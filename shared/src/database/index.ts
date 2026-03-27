@@ -1,6 +1,9 @@
 import 'reflect-metadata';
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { Notification } from '../models/notification';
+import { User } from '../models/user';
+import { ApiKey } from '../models/api-key';
+import { SmtpConfig } from '../models/smtp-config';
 import { getConfig } from '../config';
 import { getLogger } from '../logger';
 
@@ -17,7 +20,7 @@ export function createDataSourceOptions(): DataSourceOptions {
     username: config.db.username,
     password: config.db.password,
     database: config.db.database,
-    entities: [Notification],
+    entities: [Notification, User, ApiKey, SmtpConfig],
     synchronize: false, // Never in production — use migrations or init.sql
     logging: config.nodeEnv === 'development' ? ['error', 'warn'] : ['error'],
     poolSize: 20,

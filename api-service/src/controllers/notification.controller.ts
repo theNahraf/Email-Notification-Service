@@ -85,6 +85,7 @@ export async function createEmailNotification(
       payload,
       userId: user_id,
       idempotencyKey: idempotency_key,
+      ownerId: req.userId,
     });
 
     const statusCode =
@@ -209,6 +210,7 @@ export async function sendRawEmail(
       templateId: 'custom_email',
       subject,
       payload: { subject, body: emailBody },
+      ownerId: req.userId,
     });
 
     res.status(HTTP_STATUS.ACCEPTED).json({

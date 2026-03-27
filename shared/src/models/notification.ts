@@ -13,6 +13,9 @@ export class Notification {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ name: 'owner_id', type: 'uuid', nullable: true })
+  ownerId: string | null;
+
   @Column({ name: 'user_id', type: 'varchar', length: 255, nullable: true })
   userId: string | null;
 

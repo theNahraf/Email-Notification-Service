@@ -1,3 +1,12 @@
+export interface SmtpConfigData {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+}
+
 export interface EmailJobData {
   notificationId: string;
   email: string;
@@ -5,7 +14,8 @@ export interface EmailJobData {
   subject?: string;
   payload: Record<string, any>;
   userId?: string;
-  attempt?: number;
+  ownerId?: string;
+  smtpConfig?: SmtpConfigData; // Per-user SMTP credentials
 }
 
 export interface DLQJobData extends EmailJobData {

@@ -8,9 +8,12 @@ import {
   NotificationChannel,
   QueueProducer,
   EmailJobData,
+  SmtpConfigData,
   REDIS_KEYS,
   DEFAULTS,
 } from 'shared';
+import { SmtpConfig } from 'shared';
+import { decrypt } from '../utils/encryption';
 
 const logger = getLogger('notification-service');
 
@@ -21,6 +24,7 @@ export interface CreateNotificationDTO {
   payload?: Record<string, any>;
   userId?: string;
   idempotencyKey?: string;
+  ownerId?: string;
 }
 
 export interface NotificationResponse {
@@ -47,9 +51,9 @@ export class NotificationService {
 
   /**
    * Create and enqueue an email notification.
-   * Handles idempotency checks and stores the notification in DB.
    */
   async createEmailNotification(dto: CreateNotificationDTO): Promise<NotificationResponse> {
+    const config = getConfig();
     const repo = getDataSource().getRepository(Notification);
 
     // --- Idempotency Check ---
@@ -57,15 +61,46 @@ export class NotificationService {
       logger.debug({ idempotencyKey: dto.idempotencyKey }, 'Performing idempotency check');
       const existing = await this.checkIdempotency(dto.idempotencyKey);
       if (existing) {
-        logger.info(
-          { idempotencyKey: dto.idempotencyKey, existingId: existing.id },
-          'Duplicate request detected — returning existing notification'
-        );
         return {
           id: existing.id,
           status: existing.status,
           message: 'Notification already exists (idempotent)',
         };
+      }
+    }
+
+    // --- Get per-user SMTP config if available ---
+    let smtpConfig: SmtpConfigData | undefined;
+    if (dto.ownerId) {
+      const smtpRepo = getDataSource().getRepository(SmtpConfig);
+      const userSmtp = await smtpRepo.findOneBy({ userId: dto.ownerId });
+
+      if (userSmtp) {
+        const decryptedPass = decrypt(userSmtp.smtpPass);
+        smtpConfig = {
+          host: userSmtp.smtpHost,
+          port: userSmtp.smtpPort,
+          secure: userSmtp.smtpSecure,
+          user: userSmtp.smtpUser,
+          pass: decryptedPass,
+          from: userSmtp.emailFrom,
+        };
+      } else {
+        // Fallback: check daily rate limit
+        const today = new Date().toISOString().split('T')[0];
+        const rateLimitKey = `fallback:${dto.ownerId}:${today}`;
+        const currentCount = parseInt(await this.redis.get(rateLimitKey) || '0', 10);
+
+        if (currentCount >= config.fallback.dailyLimit) {
+          logger.warn({ userId: dto.ownerId, currentCount }, 'Fallback daily limit exceeded');
+          throw new Error(
+            `Daily fallback limit (${config.fallback.dailyLimit} emails/day) exceeded. Please configure your own SMTP settings in the dashboard.`
+          );
+        }
+
+        // Increment counter with 24h TTL
+        await this.redis.multi().incr(rateLimitKey).expire(rateLimitKey, 86400).exec();
+        logger.info({ userId: dto.ownerId, count: currentCount + 1, limit: config.fallback.dailyLimit }, 'Using fallback SMTP');
       }
     }
 
@@ -76,14 +111,14 @@ export class NotificationService {
       subject: dto.subject || null,
       payload: dto.payload || {},
       userId: dto.userId || null,
+      ownerId: dto.ownerId || null,
       channel: NotificationChannel.EMAIL,
       status: NotificationStatus.PENDING,
       idempotencyKey: dto.idempotencyKey || null,
       retryCount: 0,
-      maxRetries: getConfig().retry.maxAttempts,
+      maxRetries: config.retry.maxAttempts,
     });
 
-    logger.debug({ email: dto.email, channel: NotificationChannel.EMAIL }, 'Saving notification record to database');
     const saved = await repo.save(notification);
     logger.info({ notificationId: saved.id, email: dto.email, status: saved.status }, 'Notification created in DB');
 
@@ -96,18 +131,16 @@ export class NotificationService {
         subject: saved.subject || undefined,
         payload: saved.payload,
         userId: saved.userId || undefined,
+        ownerId: dto.ownerId || undefined,
+        smtpConfig,
       };
 
-      logger.debug({ notificationId: saved.id }, 'Enqueuing email job to BullMQ');
       await this.queueProducer.enqueueEmail(jobData, {
-        jobId: saved.id, // Use notification ID as job ID for traceability
+        jobId: saved.id,
       });
 
-      // Update status to QUEUED
-      logger.debug({ notificationId: saved.id }, 'Updating notification status to QUEUED');
       await repo.update(saved.id, { status: NotificationStatus.QUEUED });
 
-      // Cache idempotency key
       if (dto.idempotencyKey) {
         await this.cacheIdempotencyKey(dto.idempotencyKey, saved.id);
       }
@@ -118,75 +151,45 @@ export class NotificationService {
         message: 'Notification queued for delivery',
       };
     } catch (error) {
-      // If queue fails, update status but don't lose the notification
       await repo.update(saved.id, {
         status: NotificationStatus.FAILED,
         failureReason: 'Failed to enqueue: ' + (error as Error).message,
       });
-
       logger.error({ err: error, notificationId: saved.id }, 'Failed to enqueue notification');
       throw error;
     }
   }
 
-  /**
-   * Get a notification by ID.
-   */
   async getNotification(id: string): Promise<Notification | null> {
     const repo = getDataSource().getRepository(Notification);
     return repo.findOneBy({ id });
   }
 
-  /**
-   * Get queue statistics for monitoring.
-   */
   async getQueueStats() {
     const [emailStats, dlqStats] = await Promise.all([
       this.queueProducer.getEmailQueueStats(),
       this.queueProducer.getDLQStats(),
     ]);
-
-    return {
-      emailQueue: emailStats,
-      dlq: dlqStats,
-    };
+    return { emailQueue: emailStats, dlq: dlqStats };
   }
 
-  /**
-   * Check if an idempotency key already exists.
-   * Checks Redis first (fast path), then falls back to DB.
-   */
   private async checkIdempotency(key: string): Promise<Notification | null> {
-    // Fast path: check Redis cache
     try {
       const cachedId = await this.redis.get(`${REDIS_KEYS.IDEMPOTENCY}${key}`);
       if (cachedId) {
-        const repo = getDataSource().getRepository(Notification);
-        return repo.findOneBy({ id: cachedId });
+        return getDataSource().getRepository(Notification).findOneBy({ id: cachedId });
       }
     } catch (err) {
-      logger.warn({ err }, 'Redis idempotency check failed — falling back to DB');
+      logger.warn({ err }, 'Redis idempotency check failed');
     }
-
-    // Slow path: check DB
-    const repo = getDataSource().getRepository(Notification);
-    return repo.findOneBy({ idempotencyKey: key });
+    return getDataSource().getRepository(Notification).findOneBy({ idempotencyKey: key });
   }
 
-  /**
-   * Cache idempotency key in Redis with TTL.
-   */
   private async cacheIdempotencyKey(key: string, notificationId: string): Promise<void> {
     try {
-      await this.redis.set(
-        `${REDIS_KEYS.IDEMPOTENCY}${key}`,
-        notificationId,
-        'EX',
-        DEFAULTS.IDEMPOTENCY_TTL_SECONDS
-      );
+      await this.redis.set(`${REDIS_KEYS.IDEMPOTENCY}${key}`, notificationId, 'EX', DEFAULTS.IDEMPOTENCY_TTL_SECONDS);
     } catch (err) {
-      // Non-critical — DB still has the unique constraint
-      logger.warn({ err }, 'Failed to cache idempotency key in Redis');
+      logger.warn({ err }, 'Failed to cache idempotency key');
     }
   }
 

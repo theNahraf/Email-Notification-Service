@@ -52,6 +52,19 @@ export interface AppConfig {
   queue: {
     concurrency: number;
   };
+
+  jwt: {
+    secret: string;
+    expiresIn: string;
+  };
+
+  encryption: {
+    key: string;
+  };
+
+  fallback: {
+    dailyLimit: number;
+  };
 }
 
 function requireEnv(key: string, fallback?: string): string {
@@ -125,6 +138,19 @@ export function loadConfig(): AppConfig {
 
     queue: {
       concurrency: intEnv('QUEUE_CONCURRENCY', 5),
+    },
+
+    jwt: {
+      secret: requireEnv('JWT_SECRET', 'dev-jwt-secret-change-in-production'),
+      expiresIn: optionalEnv('JWT_EXPIRES_IN', '7d'),
+    },
+
+    encryption: {
+      key: requireEnv('ENCRYPTION_KEY', 'dev-encryption-key-32chars!!!!'),
+    },
+
+    fallback: {
+      dailyLimit: intEnv('FALLBACK_DAILY_LIMIT', 100),
     },
   };
 }
